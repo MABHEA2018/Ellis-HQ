@@ -56,39 +56,39 @@ function parseIcal(text, targetDate) {
   const targetStr = targetDate.getFullYear().toString() +
     String(targetDate.getMonth()+1).padStart(2,"0") +
     String(targetDate.getDate()).padStart(2,"0");
-
   blocks.slice(1).forEach(block => {
-    const get = key => { const m = block.match(new RegExp(key + "[^:]*:([^\r\n]+)")); return m ? m[1].trim() : ""; };
-    const dtstart = get("DTSTART");
-    const summary = get("SUMMARY");
-    if (!dtstart || !summary) return;
-
-    let eventDate, timeStr = "All day", sortMin = 0;
-
-    if (dtstart.includes("T")) {
-      // Parse as UTC and convert to Toronto local time
-      const raw = dtstart.replace(/[^0-9T]/g,"");
-      const yr = raw.substr(0,4), mo = raw.substr(4,2), dy = raw.substr(6,2);
-      const hr = raw.substr(9,2), mn = raw.substr(11,2);
-      const utcDate = new Date(`${yr}-${mo}-${dy}T${hr}:${mn}:00Z`);
-      // Convert to Toronto time
-      const torontoStr = utcDate.toLocaleDateString("en-CA", {timeZone:"America/Toronto", year:"numeric", month:"2-digit", day:"2-digit"});
-      // torontoStr is YYYY-MM-DD
-      eventDate = torontoStr.replace(/-/g,"");
-
-      const localHr = parseInt(utcDate.toLocaleString("en-CA", {timeZone:"America/Toronto", hour:"2-digit", hour12:false}));
-      const localMn = utcDate.getMinutes();
-      const ampm = localHr >= 12 ? "PM" : "AM";
-      const hr12 = localHr > 12 ? localHr - 12 : localHr === 0 ? 12 : localHr;
-      timeStr = `${hr12}:${String(localMn).padStart(2,"0")} ${ampm}`;
-      sortMin = localHr * 60 + localMn;
-    } else {
-      // All-day event — date only
-      eventDate = dtstart.replace(/-/g,"").substr(0,8);
-    }
-
-    if (eventDate !== targetStr) return;
-    events.push({ id:`gcal-${Date.now()}-${Math.random()}`, time:timeStr, title:summary, who:"Family", _sort:sortMin, _gcal:true });
+    try {
+      const get = key => { const m = block.match(new RegExp(key + "[^:]*:([^\r\n]+)")); return m ? m[1].trim() : ""; };
+      const dtstart = get("DTSTART");
+      const summary = get("SUMMARY");
+      if (!dtstart || !summary) return;
+      let eventDateStr, timeStr = "All day", sortMin = 0;
+      if (dtstart.includes("T")) {
+        const yr=dtstart.substr(0,4), mo=dtstart.substr(4,2), dy=dtstart.substr(6,2);
+        const hr=dtstart.substr(9,2), mn=dtstart.substr(11,2);
+        const isUTC = dtstart.endsWith("Z");
+        const utcDate = new Date(`${yr}-${mo}-${dy}T${hr}:${mn}:00${isUTC?"Z":""}`);
+        // Get local Toronto date parts
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone:"America/Toronto",
+          year:"numeric", month:"2-digit", day:"2-digit",
+          hour:"2-digit", minute:"2-digit", hour12:false
+        }).formatToParts(utcDate);
+        const p = {};
+        parts.forEach(x => p[x.type] = x.value);
+        eventDateStr = p.year + p.month + p.day;
+        let localHr = parseInt(p.hour); if(localHr===24)localHr=0;
+        const localMn = parseInt(p.minute);
+        const ampm = localHr >= 12 ? "PM" : "AM";
+        const hr12 = localHr > 12 ? localHr-12 : localHr===0 ? 12 : localHr;
+        timeStr = `${hr12}:${String(localMn).padStart(2,"0")} ${ampm}`;
+        sortMin = localHr * 60 + localMn;
+      } else {
+        eventDateStr = dtstart.replace(/-/g,"").substr(0,8);
+      }
+      if (eventDateStr !== targetStr) return;
+      events.push({ id:`gcal-${Date.now()}-${Math.random()}`, time:timeStr, title:summary, who:"Family", _sort:sortMin, _gcal:true });
+    } catch(e) {}
   });
   return events;
 }
