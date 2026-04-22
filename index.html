@@ -41,7 +41,7 @@ const DAYS_SHORT=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const DAYS_FULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
 const ICAL_URL="https://calendar.google.com/calendar/ical/0ea1ef108701b4351ace5361c9d3994f26c6fefed8b5db307ad3f62a55edb5e5%40group.calendar.google.com/public/basic.ics";
-const CORS_PROXY="https://corsproxy.io/?";
+const CORS_PROXY="https://api.allorigins.win/raw?url=";
 
 function getDayIdx(){const d=new Date().getDay();return d===0?6:d-1;}
 function getWeekDates(){
@@ -221,14 +221,20 @@ function Dashboard({onLock}){
 
   useEffect(()=>{
     setGcalLoading(true);
-    fetch(CORS_PROXY+encodeURIComponent(ICAL_URL))
-      .then(r=>r.text())
+    const url = CORS_PROXY + encodeURIComponent(ICAL_URL);
+    fetch(url)
+      .then(r=>{
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
       .then(text=>{
         const newEvts={};
         weekDates.forEach((date,i)=>{newEvts[i]=parseIcal(text,date);});
         setGcalEvents(newEvts);
       })
-      .catch(()=>{})
+      .catch(err=>{
+        console.error("Calendar fetch failed:", err);
+      })
       .finally(()=>setGcalLoading(false));
   },[]);
 
