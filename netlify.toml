@@ -1,0 +1,7 @@
+[build]
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/cal"
+  to = "/.netlify/functions/cal"
+  status = 200
