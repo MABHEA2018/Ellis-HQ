@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Ellis HQ"/>
+<title>Ellis HQ</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{margin:0;background:#F7F4EF;font-family:Georgia,serif;-webkit-font-smoothing:antialiased;}
+  input,select,textarea,button{font-family:Georgia,serif;-webkit-appearance:none;}
+  ::-webkit-scrollbar{display:none;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const P = {
+  bg:"#F7F4EF", card:"#FFFFFF", border:"#E8E3DA",
+  text:"#2C2C2A", muted:"#888780", dot:"#B5A898",
+  mara:  {fg:"#7B5EA7",bg:"#F0EBF8"},
+  brooke:{fg:"#5A8F6A",bg:"#EAF2EC"},
+  myles: {fg:"#3A72B0",bg:"#E6F0FA"},
+  family:{fg:"#5A6B9B",bg:"#EEF0F8"},
+};
+const whoColor = w => P[w.toLowerCase()] || P.family;
+
+async function hashPhrase(p){
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(p.toLowerCase().trim()));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+const AUTH_KEY="ellis_auth_v4", PASS_KEY="ellis_pass_v4", GCAL_KEY="gcal_v4";
+const DAYS_SHORT=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const DAYS_FULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const ICAL_URL="https://calendar.google.com/calendar/ical/0ea1ef108701b4351ace5361c9d3994f26c6fefed8b5db307ad3f62a55edb5e5%40group.calendar.google.com/public/basic.ics";
+const CORS_PROXY="https://corsproxy.io/?";
+
+function getDayIdx(){const d=new Date().getDay();return d===0?6:d-1;}
+function getWeekDates(){
+  const now=new Date(),day=now.getDay();
+  const mon=new Date(now);mon.setDate(now.getDate()-(day===0?6:day-1));
+  return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d;});
+}
+
+function parseIcal(text,targetDate){
+  const events=[];
+  const blocks=text.split("BEGIN:VEVENT");
+  blocks.slice(1).forEach(block=>{
+    const get=key=>{const m=block.match(new RegExp(key+"[^:]*:([^\r\n]+)"));return m?m[1].trim():"";};
+    const dtstart=get("DTSTART"), summary=get("SUMMARY");
+    if(!dtstart||!summary)return;
+    const dateStr=dtstart.replace(/T.*/,"").replace(/-/g,"");
+    const target=targetDate.getFullYear().toString()+String(targetDate.getMonth()+1).padStart(2,"0")+String(targetDate.getDate()).padStart(2,"0");
+    if(dateStr!==target)return;
+    let timeStr="All day",sortMin=0;
+    if(dtstart.includes("T")){
+      const t=dtstart.match(/T(\d{2})(\d{2})/);
+      if(t){
+        let h=parseInt(t[1]),m=parseInt(t[2]);
+        const ampm=h>=12?"PM":"AM",h12=h>12?h-12:h===0?12:h;
+        timeStr=`${h12}:${String(m).padStart(2,"0")} ${ampm}`;
+        sortMin=h*60+m;
+      }
+    }
+    events.push({id:`gcal-${Date.now()}-${Math.random()}`,time:timeStr,title:summary,who:"Family",_sort:sortMin,_gcal:true});
+  });
+  return events;
+}
+
+const BASE_ROUTINE=[
+  {time:"Until 8:30 AM",title:"Brooke & Ellis",who:"Brooke",_sort:0},
+  {time:"8:30 AM",title:"Mara Starts",who:"Mara",_sort:510},
+  {time:"8:45 AM",title:"Breakfast",who:"Mara",_sort:525},
+  {time:"10:00 AM",title:"Nap time",who:"Mara",_sort:600},
+  {time:"Before 1:30 PM",title:"Lunch",who:"Mara",_sort:780},
+  {time:"3:00 PM",title:"Afternoon nap",who:"Mara",_sort:900},
+  {time:"Before 5:30 PM",title:"Dinner ready for Ellis",who:"Mara",_sort:1050},
+  {time:"5:30 PM",title:"Myles & Ellis",who:"Myles",_sort:1051},
+  {time:"Before 7:30 PM",title:"Ellis bedtime",who:"Myles",_sort:1140},
+];
+
+const initWeekly=[
+  {id:1,day:0,time:"8:30",title:"Mara Starts",who:"Mara"},{id:2,day:0,time:"17:30",title:"Myles home",who:"Myles"},
+  {id:3,day:1,time:"8:30",title:"Mara Starts",who:"Mara"},{id:4,day:1,time:"17:30",title:"Myles home",who:"Myles"},
+  {id:5,day:2,time:"8:30",title:"Mara Starts",who:"Mara"},{id:6,day:2,time:"17:30",title:"Myles home",who:"Myles"},
+  {id:7,day:3,time:"8:30",title:"Mara Starts",who:"Mara"},{id:8,day:3,time:"17:30",title:"Myles home",who:"Myles"},
+  {id:9,day:4,time:"8:30",title:"Mara Starts",who:"Mara"},{id:10,day:4,time:"17:30",title:"Myles home",who:"Myles"},
+  {id:11,day:3,time:"14:30",title:"Take Ellis to swimming lessons at the YMCA",who:"Mara"},
+];
+const initTasks=[
+  {id:1,text:"Pick up dry cleaning",done:false,by:"Mara",added:"Brooke"},
+  {id:2,text:"Baby formula — nearly out",done:false,by:"Anyone",added:"Myles"},
+];
+const initGrocery=[
+  {id:1,text:"Whole milk",done:false,added:"Brooke"},
+  {id:2,text:"Baby formula",done:false,added:"Myles"},
+  {id:3,text:"Bananas",done:false,added:"Brooke"},
+];
+
+function Card({children,style={}}){
+  return <div style={{background:P.card,borderRadius:16,border:`1px solid ${P.border}`,padding:"16px 18px",marginBottom:12,...style}}>{children}</div>;
+}
+function SecTitle({color=P.dot,children,right=null}){
+  return <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+    <div style={{display:"flex",alignItems:"center",fontWeight:500,fontSize:14,color:P.text}}>
+      <span style={{width:8,height:8,borderRadius:"50%",background:color,marginRight:8,display:"inline-block",flexShrink:0}}/>
+      {children}
+    </div>
+    {right}
+  </div>;
+}
+
+function WeatherBubble(){
+  const [wx,setWx]=useState(null);
+  useEffect(()=>{
+    fetch("https://api.open-meteo.com/v1/forecast?latitude=43.6679&longitude=-79.3163&hourly=temperature_2m,weathercode&timezone=America%2FToronto&forecast_days=1")
+      .then(r=>r.json()).then(d=>{
+        const h=d.hourly,code=h.weathercode[12];
+        const icon=code<=1?"☀️":code<=3?"⛅":code<=48?"🌫️":code<=67?"🌧️":code<=77?"❄️":code<=82?"🌦️":"⛈️";
+        setWx({morning:Math.round(h.temperature_2m[9]),afternoon:Math.round(h.temperature_2m[14]),icon});
+      }).catch(()=>setWx({morning:"—",afternoon:"—",icon:"🌤️"}));
+  },[]);
+  if(!wx)return <div style={{height:36}}/>;
+  return(
+    <div style={{display:"flex",gap:8,marginTop:10}}>
+      {[["Morning",wx.morning],["Afternoon",wx.afternoon]].map(([label,temp])=>(
+        <div key={label} style={{background:P.card,border:`1px solid ${P.border}`,borderRadius:20,padding:"5px 13px",fontSize:12,color:P.text,display:"flex",alignItems:"center",gap:5}}>
+          <span>{wx.icon}</span>
+          <span style={{color:P.muted}}>{label}</span>
+          <span style={{fontWeight:500}}>{temp}°C</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LoginScreen({onLogin}){
+  const [phrase,setPhrase]=useState(""),  [isSetup,setIsSetup]=useState(false);
+  const [confirm,setConfirm]=useState(""), [error,setError]=useState(""), [loading,setLoading]=useState(false);
+  useEffect(()=>{try{setIsSetup(!!localStorage.getItem(PASS_KEY));}catch(e){}}, []);
+  const inp={width:"100%",padding:"12px 14px",borderRadius:12,border:`1px solid ${P.border}`,fontSize:16,background:"#FAFAF8",color:P.text,boxSizing:"border-box",outline:"none",fontFamily:"Georgia,serif"};
+  const submit=async()=>{
+    if(!phrase.trim())return;
+    setLoading(true);setError("");
+    const h=await hashPhrase(phrase);
+    try{
+      if(isSetup){if(h===localStorage.getItem(PASS_KEY)){localStorage.setItem(AUTH_KEY,h);onLogin();}else setError("Incorrect passphrase.");}
+      else{
+        if(phrase!==confirm){setError("Passphrases don't match.");setLoading(false);return;}
+        if(phrase.length<6){setError("Use at least 6 characters.");setLoading(false);return;}
+        localStorage.setItem(PASS_KEY,h);localStorage.setItem(AUTH_KEY,h);onLogin();
+      }
+    }catch(e){setError("Something went wrong.");}
+    setLoading(false);
+  };
+  return(
+    <div style={{background:P.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Georgia,serif",padding:24}}>
+      <div style={{width:"100%",maxWidth:360}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:40,marginBottom:10}}>🏠</div>
+          <h1 style={{margin:0,fontSize:22,fontWeight:500,color:P.text}}>Ellis HQ</h1>
+          <p style={{margin:"6px 0 0",fontSize:13,color:P.muted}}>{isSetup?"Enter your household passphrase":"Set up your household passphrase"}</p>
+        </div>
+        <Card>
+          {!isSetup&&<p style={{fontSize:13,color:P.muted,margin:"0 0 14px",lineHeight:1.6}}>Choose a passphrase for Mara, Brooke & Myles.</p>}
+          <label style={{fontSize:11,color:P.muted,display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:.5}}>Passphrase</label>
+          <input type="password" value={phrase} onChange={e=>setPhrase(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder={isSetup?"Enter passphrase…":"Choose a passphrase…"} style={{...inp,marginBottom:12}} autoFocus/>
+          {!isSetup&&<>
+            <label style={{fontSize:11,color:P.muted,display:"block",marginBottom:5,textTransform:"uppercase",letterSpacing:.5}}>Confirm</label>
+            <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="Confirm…" style={{...inp,marginBottom:12}}/>
+          </>}
+          {error&&<p style={{fontSize:13,color:"#C0392B",margin:"0 0 10px"}}>{error}</p>}
+          <button onClick={submit} disabled={loading} style={{width:"100%",padding:"13px",borderRadius:12,border:"none",background:P.mara.fg,color:"#fff",fontSize:16,fontWeight:500,cursor:"pointer",opacity:loading?.7:1}}>
+            {loading?"Checking…":isSetup?"Unlock":"Set passphrase & enter"}
+          </button>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({onLock}){
+  const [user,setUser]=useState("Mara");
+  const [tab,setTab]=useState("schedule");
+  const [extraRoutine,setExtraRoutine]=useState({});
+  const [removedRoutine,setRemovedRoutine]=useState({});
+  const [tasks,setTasks]=useState(initTasks);
+  const [grocery,setGrocery]=useState(initGrocery);
+  const [notes,setNotes]=useState([]);
+  const [newNote,setNewNote]=useState("");
+  const [newTask,setNewTask]=useState("");
+  const [taskBy,setTaskBy]=useState("Mara");
+  const [newGrocery,setNewGrocery]=useState("");
+  const [groceryAdded,setGroceryAdded]=useState("Brooke");
+  const [selDay,setSelDay]=useState(getDayIdx());
+  const [showAddRoutine,setShowAddRoutine]=useState(false);
+  const [newRE,setNewRE]=useState({time:"",title:"",who:"Mara"});
+  const [gcalUrl,setGcalUrl]=useState(()=>{try{return localStorage.getItem(GCAL_KEY)||"";}catch(e){return "";}});
+  const [gcalInput,setGcalInput]=useState("");
+  const [showGcalEdit,setShowGcalEdit]=useState(false);
+  const [showSettings,setShowSettings]=useState(false);
+  const [showChangePw,setShowChangePw]=useState(false);
+  const [newPhrase,setNewPhrase]=useState("");
+  const [confirmPhrase,setConfirmPhrase]=useState("");
+  const [pwMsg,setPwMsg]=useState("");
+  const [gcalEvents,setGcalEvents]=useState({});
+  const [gcalLoading,setGcalLoading]=useState(false);
+
+  const weekDates=getWeekDates();
+  const todayIdx=getDayIdx();
+  const todayDate=new Date().getDate();
+  const uc=whoColor(user);
+
+  useEffect(()=>{
+    setGcalLoading(true);
+    fetch(CORS_PROXY+encodeURIComponent(ICAL_URL))
+      .then(r=>r.text())
+      .then(text=>{
+        const newEvts={};
+        weekDates.forEach((date,i)=>{newEvts[i]=parseIcal(text,date);});
+        setGcalEvents(newEvts);
+      })
+      .catch(()=>{})
+      .finally(()=>setGcalLoading(false));
+  },[]);
+
+  const inp={width:"100%",padding:"10px 12px",borderRadius:10,border:`1px solid ${P.border}`,fontSize:14,background:"#FAFAF8",color:P.text,boxSizing:"border-box",outline:"none",fontFamily:"inherit"};
+  const btn=(primary,color)=>({padding:"9px 16px",borderRadius:10,border:`1px solid ${primary?(color||uc.fg):P.border}`,background:primary?(color||uc.fg):"transparent",color:primary?"#fff":P.text,fontSize:13,fontWeight:500,cursor:"pointer"});
+
+  const isWeekend=d=>d===5||d===6;
+
+  const getTimeline=(dayIdx)=>{
+    const base=isWeekend(dayIdx)?[]:[...BASE_ROUTINE.map((e,i)=>({...e,_baseIdx:i,id:`base-${i}`}))];
+    const removed=removedRoutine[dayIdx]||[];
+    const filtered=base.filter(e=>!removed.includes(e._baseIdx));
+    const extras=(extraRoutine[dayIdx]||[]);
+    const gcal=(gcalEvents[dayIdx]||[]);
+    return [...filtered,...extras,...gcal].sort((a,b)=>{
+      const toMin=e=>{
+        if(e._sort!==undefined)return e._sort;
+        const m=(e.time||"").match(/(\d+):(\d+)\s*(AM|PM)?/i);
+        if(!m)return 999*60;
+        let h=parseInt(m[1]),mn=parseInt(m[2]);
+        const ap=(m[3]||"").toUpperCase();
+        if(ap==="PM"&&h!==12)h+=12;
+        if(ap==="AM"&&h===12)h=0;
+        return h*60+mn;
+      };
+      return toMin(a)-toMin(b);
+    });
+  };
+
+  const addRoutineEvent=()=>{
+    if(!newRE.title.trim()||!newRE.time)return;
+    const [h,m]=newRE.time.split(":");
+    const hr=parseInt(h),ampm=hr>=12?"PM":"AM",hr12=hr>12?hr-12:hr===0?12:hr;
+    const evt={id:`extra-${Date.now()}`,time:`${hr12}:${m} ${ampm}`,title:newRE.title,who:newRE.who,_sort:hr*60+parseInt(m)};
+    setExtraRoutine(prev=>({...prev,[selDay]:[...(prev[selDay]||[]),evt]}));
+    setNewRE({time:"",title:"",who:"Mara"});
+    setShowAddRoutine(false);
+  };
+  const removeTimelineEvent=(evt)=>{
+    if(typeof evt._baseIdx==="number"){setRemovedRoutine(prev=>({...prev,[selDay]:[...(prev[selDay]||[]),evt._baseIdx]}));}
+    else{setExtraRoutine(prev=>({...prev,[selDay]:(prev[selDay]||[]).filter(e=>e.id!==evt.id)}));}
+  };
+  const addNote=()=>{if(!newNote.trim())return;const ts=new Date().toLocaleString("en-CA",{weekday:"short",hour:"numeric",minute:"2-digit"});setNotes(n=>[{id:Date.now(),from:user,text:newNote,ts},...n]);setNewNote("");};
+  const addTask=()=>{if(!newTask.trim())return;setTasks(t=>[...t,{id:Date.now(),text:newTask,done:false,by:taskBy,added:user}]);setNewTask("");};
+  const addGrocery=()=>{if(!newGrocery.trim())return;setGrocery(g=>[...g,{id:Date.now(),text:newGrocery,done:false,added:groceryAdded}]);setNewGrocery("");};
+  const changePw=async()=>{
+    if(newPhrase.length<6){setPwMsg("Use at least 6 characters.");return;}
+    if(newPhrase!==confirmPhrase){setPwMsg("Passphrases don't match.");return;}
+    const h=await hashPhrase(newPhrase);
+    try{localStorage.setItem(PASS_KEY,h);localStorage.setItem(AUTH_KEY,h);setPwMsg("✓ Updated!");setTimeout(()=>{setShowChangePw(false);setShowSettings(false);setPwMsg("");setNewPhrase("");setConfirmPhrase("");},1500);}
+    catch(e){setPwMsg("Something went wrong.");}
+  };
+  const lock=()=>{try{localStorage.removeItem(AUTH_KEY);}catch(e){}onLock();};
+
+  const todoTasks=tasks.filter(t=>!t.done),doneTasks=tasks.filter(t=>t.done);
+  const todoGrocery=grocery.filter(g=>!g.done),doneGrocery=grocery.filter(g=>g.done);
+  const parentNotes=notes.filter(n=>n.from!=="Mara").slice(0,3);
+  const monthLabel=()=>{const s=weekDates[0],e=weekDates[6];const sm=MONTHS[s.getMonth()],em=MONTHS[e.getMonth()];return sm===em?`${sm} ${s.getDate()}–${e.getDate()}`:`${sm} ${s.getDate()} – ${em} ${e.getDate()}`;};
+  const timeline=getTimeline(selDay);
+  const TABS=[{k:"schedule",label:"Schedule"},{k:"errands",label:"Errands"},{k:"grocery",label:"Grocery"},{k:"gcal",label:"Calendar"}];
+
+  return(
+    <div style={{background:P.bg,minHeight:"100vh",fontFamily:"Georgia,serif",paddingBottom:82,maxWidth:430,margin:"0 auto",position:"relative"}}>
+
+      {showSettings&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.35)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={()=>setShowSettings(false)}>
+          <div style={{background:P.card,borderRadius:"20px 20px 0 0",padding:"20px 20px 36px",width:"100%",maxWidth:430}} onClick={e=>e.stopPropagation()}>
+            <div style={{width:36,height:4,background:P.border,borderRadius:2,margin:"0 auto 18px"}}/>
+            <h2 style={{margin:"0 0 14px",fontSize:17,fontWeight:500,color:P.text}}>Settings</h2>
+            {!showChangePw
+              ?<button onClick={()=>setShowChangePw(true)} style={{...btn(false),width:"100%",textAlign:"left",marginBottom:10}}>🔑 Change passphrase</button>
+              :<div style={{marginBottom:12}}>
+                <input type="password" value={newPhrase} onChange={e=>setNewPhrase(e.target.value)} placeholder="New passphrase…" style={{...inp,marginBottom:8}}/>
+                <input type="password" value={confirmPhrase} onChange={e=>setConfirmPhrase(e.target.value)} placeholder="Confirm…" style={{...inp,marginBottom:8}}/>
+                {pwMsg&&<p style={{fontSize:13,color:pwMsg.startsWith("✓")?"#5A8F6A":"#C0392B",margin:"0 0 8px"}}>{pwMsg}</p>}
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={changePw} style={btn(true)}>Update</button>
+                  <button onClick={()=>setShowChangePw(false)} style={btn(false)}>Cancel</button>
+                </div>
+              </div>
+            }
+            <button onClick={lock} style={{...btn(false),width:"100%",textAlign:"left",color:"#C0392B",borderColor:"#C0392B"}}>🔒 Lock dashboard</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{padding:"18px 18px 0"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <h1 style={{margin:0,fontSize:20,fontWeight:500,color:P.text}}>Ellis HQ</h1>
+            <p style={{margin:"3px 0 0",fontSize:12,color:P.muted}}>{user==="Mara"?"Hi Mara — here's your week ✦":`Hi ${user} ✦`}</p>
+          </div>
+          <div style={{display:"flex",gap:5,alignItems:"center"}}>
+            {["Mara","Brooke","Myles"].map(n=>{const c=whoColor(n);return(
+              <button key={n} onClick={()=>setUser(n)} style={{padding:"6px 11px",fontSize:12,fontWeight:500,borderRadius:20,border:`1.5px solid ${user===n?c.fg:P.border}`,background:user===n?c.fg:"transparent",color:user===n?"#fff":P.muted,cursor:"pointer"}}>{n}</button>
+            );})}
+            <button onClick={()=>setShowSettings(true)} style={{padding:"6px 9px",fontSize:14,borderRadius:20,border:`1px solid ${P.border}`,background:"transparent",color:P.muted,cursor:"pointer",lineHeight:1}}>⚙️</button>
+          </div>
+        </div>
+        <div style={{height:3,background:"#EAF2EB",borderRadius:2,marginTop:10,overflow:"hidden"}}>
+          <div style={{height:"100%",width:"60%",background:uc.fg,borderRadius:2,transition:"background .3s"}}/>
+        </div>
+        <WeatherBubble/>
+      </div>
+
+      <div style={{padding:"12px 18px 0"}}>
+        <Card style={{borderLeft:`3px solid ${P.brooke.fg}`,paddingLeft:14}}>
+          <SecTitle color={P.brooke.fg}>Notes from Brooke & Myles</SecTitle>
+          {parentNotes.length===0
+            ?<p style={{fontSize:13,color:P.muted,fontStyle:"italic",margin:"0 0 8px"}}>No new notes.</p>
+            :parentNotes.map(n=>(
+              <div key={n.id} style={{marginBottom:8}}>
+                <p style={{margin:"0 0 2px",fontSize:13,color:P.text,lineHeight:1.6}}>{n.text}</p>
+                <span style={{fontSize:11,color:P.muted}}>{n.from} · {n.ts}</span>
+              </div>
+            ))
+          }
+          {(user==="Brooke"||user==="Myles")&&<>
+            <textarea value={newNote} onChange={e=>setNewNote(e.target.value)} placeholder="Leave a note for Mara…" rows={2} style={{...inp,resize:"none",lineHeight:1.5,marginTop:8,marginBottom:8}}/>
+            <button onClick={addNote} style={btn(true,P.brooke.fg)}>Post note</button>
+          </>}
+        </Card>
+      </div>
+
+      <div style={{padding:"0 18px"}}>
+
+        {tab==="schedule"&&<>
+          <div style={{display:"flex",gap:4,marginBottom:12,overflowX:"auto",paddingBottom:2}}>
+            {weekDates.map((d,i)=>{
+              const isToday=i===todayIdx,isSel=i===selDay,wknd=isWeekend(i);
+              return(
+                <button key={i} onClick={()=>setSelDay(i)} style={{flex:"0 0 auto",display:"flex",flexDirection:"column",alignItems:"center",padding:"7px 9px",borderRadius:12,border:`1.5px solid ${isSel?uc.fg:P.border}`,background:isSel?uc.fg:"white",cursor:"pointer",minWidth:44,opacity:wknd?.7:1}}>
+                  <span style={{fontSize:10,color:isSel?"rgba(255,255,255,.75)":(isToday?uc.fg:P.muted),fontWeight:isToday?600:400,textTransform:"uppercase",letterSpacing:.3}}>{DAYS_SHORT[i]}</span>
+                  <span style={{fontSize:16,fontWeight:500,color:isSel?"#fff":(isToday?uc.fg:P.text),marginTop:1}}>{d.getDate()}</span>
+                </button>
+              );
+            })}
+          </div>
+          <Card>
+            <SecTitle color={uc.fg} right={<span style={{fontSize:11,color:P.muted}}>{MONTHS[weekDates[selDay].getMonth()]} {weekDates[selDay].getDate()}</span>}>
+              Today's Timeline — {DAYS_FULL[selDay]}
+            </SecTitle>
+            {gcalLoading&&<p style={{fontSize:12,color:P.muted,fontStyle:"italic",marginBottom:8}}>Syncing calendar…</p>}
+            {isWeekend(selDay)&&timeline.length===0&&<p style={{fontSize:13,color:P.muted,fontStyle:"italic",marginBottom:10}}>Weekend — no routine scheduled.</p>}
+            <div style={{position:"relative",paddingLeft:16}}>
+              {timeline.length>0&&<div style={{position:"absolute",left:3,top:8,bottom:8,width:2,background:P.border,borderRadius:2}}/>}
+              {timeline.map((item,i)=>{
+                const c=whoColor(item.who);
+                return(
+                  <div key={item.id||i} style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:8,position:"relative"}}>
+                    <div style={{position:"absolute",left:-13,top:6,width:8,height:8,borderRadius:"50%",background:c.fg,border:`2px solid ${P.bg}`,zIndex:1}}/>
+                    <div style={{flex:1,background:c.bg,borderRadius:8,padding:"7px 11px",borderLeft:`2px solid ${c.fg}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
+                        <span style={{fontSize:13,color:P.text}}>{item.title}{item._gcal&&<span style={{fontSize:10,color:c.fg,marginLeft:5}}>● cal</span>}</span>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <span style={{fontSize:10,color:c.fg,background:"white",padding:"1px 7px",borderRadius:20,border:`1px solid ${c.fg}`}}>{item.who}</span>
+                          <span style={{fontSize:10,color:P.muted}}>{item.time}</span>
+                          <button onClick={()=>removeTimelineEvent(item)} style={{background:"none",border:"none",color:P.muted,cursor:"pointer",fontSize:14,lineHeight:1,padding:"0 2px"}}>×</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {!showAddRoutine
+              ?<button onClick={()=>setShowAddRoutine(true)} style={{...btn(false),marginTop:4,fontSize:12,padding:"7px 13px"}}>+ Add event</button>
+              :<div style={{marginTop:10,padding:12,background:"#FAFAF8",borderRadius:10,border:`1px solid ${P.border}`}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}}>
+                  <input type="time" value={newRE.time} onChange={e=>setNewRE(v=>({...v,time:e.target.value}))} style={inp}/>
+                  <select value={newRE.who} onChange={e=>setNewRE(v=>({...v,who:e.target.value}))} style={inp}>
+                    {["Mara","Brooke","Myles","Family"].map(w=><option key={w}>{w}</option>)}
+                  </select>
+                </div>
+                <input placeholder="Event title…" value={newRE.title} onChange={e=>setNewRE(v=>({...v,title:e.target.value}))} style={{...inp,marginBottom:8}}/>
+                <div style={{display:"flex",gap:7}}>
+                  <button onClick={addRoutineEvent} style={btn(true)}>Add</button>
+                  <button onClick={()=>setShowAddRoutine(false)} style={btn(false)}>Cancel</button>
+                </div>
+              </div>
+            }
+          </Card>
+        </>}
+
+        {tab==="errands"&&<>
+          <Card>
+            <SecTitle color={uc.fg}>Errands</SecTitle>
+            {todoTasks.length===0&&<div style={{fontSize:13,color:P.muted,fontStyle:"italic",marginBottom:12}}>All done! 🎉</div>}
+            {todoTasks.map(t=>(
+              <div key={t.id} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"9px 0",borderBottom:`1px solid ${P.border}`}}>
+                <input type="checkbox" checked={false} onChange={()=>setTasks(ts=>ts.map(x=>x.id===t.id?{...x,done:true}:x))} style={{marginTop:3,accentColor:uc.fg,width:18,height:18,cursor:"pointer"}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,color:P.text}}>{t.text}</div>
+                  <div style={{fontSize:11,color:P.muted,marginTop:2}}>For: <strong>{t.by}</strong> · Added by {t.added}</div>
+                </div>
+                <button onClick={()=>setTasks(ts=>ts.filter(x=>x.id!==t.id))} style={{background:"none",border:"none",color:P.muted,cursor:"pointer",fontSize:16,padding:"0 2px"}}>×</button>
+              </div>
+            ))}
+            <div style={{marginTop:14,display:"flex",gap:7}}>
+              <input placeholder="New errand…" value={newTask} onChange={e=>setNewTask(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTask()} style={{...inp,flex:1}}/>
+              <select value={taskBy} onChange={e=>setTaskBy(e.target.value)} style={{...inp,width:"auto"}}>
+                {["Mara","Anyone","Myles","Brooke"].map(w=><option key={w}>{w}</option>)}
+              </select>
+              <button onClick={addTask} style={btn(true)}>Add</button>
+            </div>
+          </Card>
+          {doneTasks.length>0&&<Card style={{opacity:.75}}>
+            <SecTitle color={P.muted}>Done</SecTitle>
+            {doneTasks.map(t=>(
+              <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:`1px solid ${P.border}`}}>
+                <input type="checkbox" checked onChange={()=>setTasks(ts=>ts.map(x=>x.id===t.id?{...x,done:false}:x))} style={{accentColor:uc.fg,width:18,height:18,cursor:"pointer"}}/>
+                <span style={{fontSize:13,color:P.muted,textDecoration:"line-through",flex:1}}>{t.text}</span>
+                <button onClick={()=>setTasks(ts=>ts.filter(x=>x.id!==t.id))} style={{background:"none",border:"none",color:P.muted,cursor:"pointer",fontSize:16,padding:"0 2px"}}>×</button>
+              </div>
+            ))}
+          </Card>}
+          <Card>
+            <SecTitle color={uc.fg}>Leave a note</SecTitle>
+            <textarea value={newNote} onChange={e=>setNewNote(e.target.value)} placeholder="Let the family know anything…" rows={3} style={{...inp,resize:"none",lineHeight:1.6,marginBottom:8}}/>
+            <button onClick={addNote} style={btn(true)}>Post as {user}</button>
+          </Card>
+        </>}
+
+        {tab==="grocery"&&<Card>
+          <SecTitle color={uc.fg}>Grocery List</SecTitle>
+          {todoGrocery.length===0&&<p style={{fontSize:13,color:P.muted,fontStyle:"italic",marginBottom:12}}>List is empty!</p>}
+          {todoGrocery.map(g=>(
+            <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:`1px solid ${P.border}`}}>
+              <input type="checkbox" checked={false} onChange={()=>setGrocery(gs=>gs.map(x=>x.id===g.id?{...x,done:true}:x))} style={{accentColor:uc.fg,width:18,height:18,cursor:"pointer"}}/>
+              <span style={{fontSize:14,color:P.text,flex:1}}>{g.text}</span>
+              <span style={{fontSize:11,color:P.muted}}>{g.added}</span>
+              <button onClick={()=>setGrocery(gs=>gs.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:P.muted,cursor:"pointer",fontSize:16,padding:"0 2px"}}>×</button>
+            </div>
+          ))}
+          <div style={{marginTop:12,display:"flex",gap:7}}>
+            <input placeholder="Add item…" value={newGrocery} onChange={e=>setNewGrocery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addGrocery()} style={{...inp,flex:1}}/>
+            <select value={groceryAdded} onChange={e=>setGroceryAdded(e.target.value)} style={{...inp,width:"auto"}}>
+              {["Brooke","Myles","Mara"].map(w=><option key={w}>{w}</option>)}
+            </select>
+            <button onClick={addGrocery} style={btn(true)}>Add</button>
+          </div>
+          {doneGrocery.length>0&&<div style={{marginTop:14}}>
+            <div style={{fontSize:11,color:P.muted,textTransform:"uppercase",letterSpacing:.4,marginBottom:7}}>In cart</div>
+            {doneGrocery.map(g=>(
+              <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:`1px solid ${P.border}`,opacity:.65}}>
+                <input type="checkbox" checked onChange={()=>setGrocery(gs=>gs.map(x=>x.id===g.id?{...x,done:false}:x))} style={{accentColor:uc.fg,width:18,height:18,cursor:"pointer"}}/>
+                <span style={{fontSize:13,color:P.muted,textDecoration:"line-through",flex:1}}>{g.text}</span>
+                <button onClick={()=>setGrocery(gs=>gs.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:P.muted,cursor:"pointer",fontSize:16,padding:"0 2px"}}>×</button>
+              </div>
+            ))}
+          </div>}
+        </Card>}
+
+        {tab==="gcal"&&<Card>
+          <SecTitle color={uc.fg}>Family Calendar</SecTitle>
+          <p style={{fontSize:12,color:P.muted,margin:"0 0 12px",lineHeight:1.5}}>Connect Google Calendar: Settings → your calendar → Integrate calendar → copy the embed URL.</p>
+          {gcalUrl
+            ?<><iframe src={gcalUrl} style={{width:"100%",height:480,border:"none",borderRadius:10}} title="Family Calendar"/>
+              <button onClick={()=>{setShowGcalEdit(true);setGcalInput(gcalUrl);}} style={{...btn(false),marginTop:8,fontSize:12,padding:"7px 13px"}}>Change URL</button></>
+            :<div style={{textAlign:"center",padding:"32px 0"}}>
+              <div style={{fontSize:36,marginBottom:10}}>📅</div>
+              <p style={{fontSize:13,color:P.muted,marginBottom:14}}>No calendar connected yet.</p>
+              <button onClick={()=>setShowGcalEdit(true)} style={btn(true)}>Connect Google Calendar</button>
+            </div>
+          }
+          {showGcalEdit&&<div style={{marginTop:12,padding:12,background:"#FAFAF8",borderRadius:10,border:`1px solid ${P.border}`}}>
+            <input value={gcalInput} onChange={e=>setGcalInput(e.target.value)} placeholder="https://calendar.google.com/calendar/embed?src=…" style={{...inp,marginBottom:9}}/>
+            <div style={{display:"flex",gap:7}}>
+              <button onClick={()=>{try{localStorage.setItem(GCAL_KEY,gcalInput);}catch(e){}setGcalUrl(gcalInput);setShowGcalEdit(false);}} style={btn(true)}>Save</button>
+              <button onClick={()=>setShowGcalEdit(false)} style={btn(false)}>Cancel</button>
+            </div>
+          </div>}
+        </Card>}
+
+      </div>
+
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"rgba(247,244,239,0.96)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderTop:`1px solid ${P.border}`,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
+        {TABS.map(({k,label})=>{
+          const active=tab===k,isCalTab=k==="schedule";
+          return(
+            <button key={k} onClick={()=>setTab(k)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"10px 4px 8px",background:"none",border:"none",cursor:"pointer",gap:2}}>
+              {isCalTab
+                ?<div style={{width:24,height:24,borderRadius:5,border:`1.5px solid ${active?uc.fg:P.muted}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+                  <div style={{width:"100%",height:7,background:active?uc.fg:P.muted,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{fontSize:5,color:"white",fontWeight:700,lineHeight:1}}>●●</span>
+                  </div>
+                  <span style={{fontSize:10,fontWeight:700,color:active?uc.fg:P.muted,lineHeight:1.2}}>{todayDate}</span>
+                </div>
+                :k==="errands"?<span style={{fontSize:22,lineHeight:1}}>✓</span>
+                :k==="grocery"?<span style={{fontSize:20,lineHeight:1}}>🛒</span>
+                :<span style={{fontSize:20,lineHeight:1}}>🗓</span>
+              }
+              <span style={{fontSize:10,color:active?uc.fg:P.muted,fontWeight:active?500:400}}>{label}</span>
+              {active&&<div style={{width:4,height:4,borderRadius:"50%",background:uc.fg}}/>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const [authed,setAuthed]=useState(false),[checking,setChecking]=useState(true);
+  useEffect(()=>{
+    try{const s=localStorage.getItem(PASS_KEY),a=localStorage.getItem(AUTH_KEY);if(s&&a&&a===s)setAuthed(true);}catch(e){}
+    setChecking(false);
+  },[]);
+  if(checking)return <div style={{background:P.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{color:P.muted,fontFamily:"Georgia,serif",fontSize:14}}>Loading…</span></div>;
+  if(!authed)return <LoginScreen onLogin={()=>setAuthed(true)}/>;
+  return <Dashboard onLock={()=>setAuthed(false)}/>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
