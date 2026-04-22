@@ -50,27 +50,45 @@ function getWeekDates(){
   return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d;});
 }
 
-function parseIcal(text,targetDate){
-  const events=[];
-  const blocks=text.split("BEGIN:VEVENT");
-  blocks.slice(1).forEach(block=>{
-    const get=key=>{const m=block.match(new RegExp(key+"[^:]*:([^\r\n]+)"));return m?m[1].trim():"";};
-    const dtstart=get("DTSTART"), summary=get("SUMMARY");
-    if(!dtstart||!summary)return;
-    const dateStr=dtstart.replace(/T.*/,"").replace(/-/g,"");
-    const target=targetDate.getFullYear().toString()+String(targetDate.getMonth()+1).padStart(2,"0")+String(targetDate.getDate()).padStart(2,"0");
-    if(dateStr!==target)return;
-    let timeStr="All day",sortMin=0;
-    if(dtstart.includes("T")){
-      const t=dtstart.match(/T(\d{2})(\d{2})/);
-      if(t){
-        let h=parseInt(t[1]),m=parseInt(t[2]);
-        const ampm=h>=12?"PM":"AM",h12=h>12?h-12:h===0?12:h;
-        timeStr=`${h12}:${String(m).padStart(2,"0")} ${ampm}`;
-        sortMin=h*60+m;
-      }
+function parseIcal(text, targetDate) {
+  const events = [];
+  const blocks = text.split("BEGIN:VEVENT");
+  const targetStr = targetDate.getFullYear().toString() +
+    String(targetDate.getMonth()+1).padStart(2,"0") +
+    String(targetDate.getDate()).padStart(2,"0");
+
+  blocks.slice(1).forEach(block => {
+    const get = key => { const m = block.match(new RegExp(key + "[^:]*:([^\r\n]+)")); return m ? m[1].trim() : ""; };
+    const dtstart = get("DTSTART");
+    const summary = get("SUMMARY");
+    if (!dtstart || !summary) return;
+
+    let eventDate, timeStr = "All day", sortMin = 0;
+
+    if (dtstart.includes("T")) {
+      // Parse as UTC and convert to Toronto local time
+      const raw = dtstart.replace(/[^0-9T]/g,"");
+      const yr = raw.substr(0,4), mo = raw.substr(4,2), dy = raw.substr(6,2);
+      const hr = raw.substr(9,2), mn = raw.substr(11,2);
+      const utcDate = new Date(`${yr}-${mo}-${dy}T${hr}:${mn}:00Z`);
+      // Convert to Toronto time
+      const torontoStr = utcDate.toLocaleDateString("en-CA", {timeZone:"America/Toronto", year:"numeric", month:"2-digit", day:"2-digit"});
+      // torontoStr is YYYY-MM-DD
+      eventDate = torontoStr.replace(/-/g,"");
+
+      const localHr = parseInt(utcDate.toLocaleString("en-CA", {timeZone:"America/Toronto", hour:"2-digit", hour12:false}));
+      const localMn = utcDate.getMinutes();
+      const ampm = localHr >= 12 ? "PM" : "AM";
+      const hr12 = localHr > 12 ? localHr - 12 : localHr === 0 ? 12 : localHr;
+      timeStr = `${hr12}:${String(localMn).padStart(2,"0")} ${ampm}`;
+      sortMin = localHr * 60 + localMn;
+    } else {
+      // All-day event — date only
+      eventDate = dtstart.replace(/-/g,"").substr(0,8);
     }
-    events.push({id:`gcal-${Date.now()}-${Math.random()}`,time:timeStr,title:summary,who:"Family",_sort:sortMin,_gcal:true});
+
+    if (eventDate !== targetStr) return;
+    events.push({ id:`gcal-${Date.now()}-${Math.random()}`, time:timeStr, title:summary, who:"Family", _sort:sortMin, _gcal:true });
   });
   return events;
 }
@@ -377,6 +395,7 @@ function Dashboard({onLock}){
             <SecTitle color={uc.fg} right={<span style={{fontSize:11,color:P.muted}}>{MONTHS[weekDates[selDay].getMonth()]} {weekDates[selDay].getDate()}</span>}>
               Today's Timeline — {DAYS_FULL[selDay]}
             </SecTitle>
+            {gcalDebug&&<p style={{fontSize:11,color:P.muted,fontStyle:"italic",marginBottom:8,wordBreak:"break-all"}}>{gcalDebug}</p>}
             {gcalLoading&&<p style={{fontSize:12,color:P.muted,fontStyle:"italic",marginBottom:8}}>Syncing calendar…</p>}
             {isWeekend(selDay)&&timeline.length===0&&<p style={{fontSize:13,color:P.muted,fontStyle:"italic",marginBottom:10}}>Weekend — no routine scheduled.</p>}
             <div style={{position:"relative",paddingLeft:16}}>
